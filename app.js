@@ -701,10 +701,12 @@ const MAX_SHARED_PLAYERS = 10;
 const MAX_SIEGE_ALLIES = 2;
 const MISSION_LENGTH_OPTIONS = [2, 3, 4, 5];
 const DEFAULT_MISSION_LENGTH = 3;
+const SAVED_GAME_KEY = "bite-shared-game-progress";
+const savedGameProgress = loadSavedGameProgress();
 
 const state = {
   route: "home",
-  gameVersion: localStorage.getItem("bite-game-version") || "",
+  gameVersion: savedGameProgress?.gameVersion || localStorage.getItem("bite-game-version") || "",
   workshopAnimal: "",
   workshopSort: "body",
   trophyMissionLength: Number(localStorage.getItem("bite-trophy-mission-length")) || DEFAULT_MISSION_LENGTH,
@@ -712,7 +714,7 @@ const state = {
   showChineseNames: localStorage.getItem("bite-show-chinese-names") !== "false",
   showVocabTranslations: localStorage.getItem("bite-show-vocab-translations") !== "false",
   linePools: loadLinePools(),
-  shared: createSharedState(),
+  shared: savedGameProgress?.shared || createSharedState(),
 };
 
 const app = document.querySelector("#app");
@@ -785,6 +787,7 @@ function bindShellEvents() {
 }
 
 function render() {
+  saveGameProgress();
   backButton.classList.toggle("hidden", state.route === "home" || state.route === "version-select");
 
   if (!state.gameVersion) {
@@ -796,6 +799,12 @@ function render() {
   if (state.route === "home") {
     app.innerHTML = `
       <section class="home-grid" aria-label="Choose device mode">
+        ${hasSavedGameProgress() ? `
+          <button class="big-choice" type="button" data-resume-game>
+            <strong>Resume Game</strong>
+            <span>Continue the saved shared game.</span>
+          </button>
+        ` : ""}
         <button class="big-choice" type="button" data-open-shared-setup>
           <strong>Start Game</strong>
           <span>Pass one device around for outcome lines.</span>
@@ -807,6 +816,7 @@ function render() {
       </section>
     `;
     bindRouteButtons();
+    app.querySelector("[data-resume-game]")?.addEventListener("click", resumeSavedGame);
     app.querySelector("[data-open-shared-setup]").addEventListener("click", openSharedSetupModal);
     return;
   }
@@ -1009,6 +1019,64 @@ function bindRouteButtons() {
   });
 }
 
+function loadSavedGameProgress() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_GAME_KEY) || "null");
+    if (!saved?.shared?.players?.length) return null;
+    return {
+      gameVersion: saved.gameVersion || "",
+      shared: normalizeSharedState(saved.shared),
+    };
+  } catch {
+    localStorage.removeItem(SAVED_GAME_KEY);
+    return null;
+  }
+}
+
+function normalizeSharedState(shared) {
+  return {
+    ...createSharedState(),
+    ...shared,
+    players: Array.isArray(shared.players) ? shared.players.map(normalizeSharedPlayer) : [],
+    siegeResponders: Array.isArray(shared.siegeResponders) ? shared.siegeResponders.map(normalizeSharedPlayer) : [],
+    siegeAllies: Array.isArray(shared.siegeAllies) ? shared.siegeAllies.map(normalizeSharedPlayer) : [],
+    pendingTrophyClaimQueue: Array.isArray(shared.pendingTrophyClaimQueue) ? shared.pendingTrophyClaimQueue : [],
+  };
+}
+
+function normalizeSharedPlayer(player, index = 0) {
+  return {
+    id: player.id || `player-${index + 1}`,
+    name: player.name || `Player ${index + 1}`,
+    score: Number(player.score) || 0,
+    trophies: Array.isArray(player.trophies) ? player.trophies : [],
+    privateMissions: Array.isArray(player.privateMissions) ? player.privateMissions : [],
+  };
+}
+
+function saveGameProgress() {
+  if (!state.shared.players.length) return;
+  localStorage.setItem(SAVED_GAME_KEY, JSON.stringify({
+    gameVersion: state.gameVersion,
+    shared: state.shared,
+  }));
+}
+
+function hasSavedGameProgress() {
+  return Boolean(loadSavedGameProgress());
+}
+
+function resumeSavedGame() {
+  const saved = loadSavedGameProgress();
+  if (!saved) return;
+  state.gameVersion = saved.gameVersion || state.gameVersion;
+  localStorage.setItem("bite-game-version", state.gameVersion);
+  state.shared = saved.shared;
+  state.route = "shared-device";
+  renderVersionSettings();
+  render();
+}
+
 function renderOwnDeviceHome() {
   app.innerHTML = `
     <section class="home-grid" aria-label="Choose practice type">
@@ -1094,6 +1162,7 @@ function renderSharedDevice() {
   if (shared.phase === "choose-action") renderSharedActionPicker(currentPlayer);
   if (shared.phase === "choose-target") renderSharedTargetPicker(currentPlayer);
   if (shared.phase === "siege-join") renderSharedSiegeJoin(currentPlayer);
+  if (shared.phase === "siege-lowest-select") renderSharedSiegeLowestPicker(currentPlayer);
   if (shared.phase === "attack-outcome") renderSharedOutcomePicker(currentPlayer, "Attack outcome", ["Attack Win", "Attack Loss", "Attack Tie"]);
   if (shared.phase === "siege-outcome") renderSharedOutcomePicker(currentPlayer, "Siege outcome", ["Siege Attackers Win", "Siege Defender Wins"]);
   if (shared.phase === "claim-trophy") renderSharedTrophyPicker(currentPlayer);
@@ -1273,25 +1342,77 @@ function renderSharedOutcomePicker(currentPlayer, heading, outcomeTitles) {
 
 function handleSharedOutcome(group, currentPlayer) {
   openSharedLineModal(displayTitle(group.title), currentPlayer.name, [group], "Claim trophy", () => {
-    state.shared.claimingPlayerId = trophyClaimingPlayerId(group, currentPlayer);
-    state.shared.claimingPlayerName = trophyClaimingPlayerLabel(group, currentPlayer);
+    state.shared.pendingOutcomeTitle = group.title;
+    if (group.title === "Siege Attackers Win") {
+      state.shared.phase = "siege-lowest-select";
+      render();
+      return;
+    }
+    if (group.title === "Siege Defender Wins") {
+      const defender = state.shared.players.find((player) => player.id === state.shared.targetId) || currentPlayer;
+      setTrophyClaimContext(defender, siegeParticipants(currentPlayer));
+      state.shared.phase = "claim-trophy";
+      render();
+      return;
+    }
+    const claimingPlayer = state.shared.players.find((player) => player.id === trophyClaimingPlayerId(group, currentPlayer)) || currentPlayer;
+    setTrophyClaimContext(claimingPlayer, trophyClaimTargetsForOutcome(group, currentPlayer));
     state.shared.phase = "claim-trophy";
     render();
   }, { targetName: state.shared.targetName });
 }
 
+function renderSharedSiegeLowestPicker(currentPlayer) {
+  const participants = siegeParticipants(currentPlayer);
+  app.innerHTML = `
+    <section class="shared-status">
+      <p class="eyebrow">Siege Trophy</p>
+      <h2>Who has the lowest face value?</h2>
+      <p>Choose the siege participant with the lowest revealed card. That player claims the defender's trophy.</p>
+    </section>
+    <section class="menu-grid" aria-label="Lowest siege card holder">
+      <details class="menu-card" open>
+        <summary>Lowest card holder</summary>
+        <div class="chip-grid">
+          ${participants.map((player) => actionButton(player.name, `lowest-card-${player.id}`, "Claims the defender's trophy.")).join("")}
+        </div>
+      </details>
+      <section class="reaction-panel" aria-label="Siege trophy controls">
+        ${actionButton("Back to Action", "back-to-action", "Cancel this resolution.")}
+      </section>
+    </section>
+  `;
+
+  participants.forEach((player) => {
+    app.querySelector(`[data-open="lowest-card-${player.id}"]`).addEventListener("click", () => {
+      setTrophyClaimContext(player, targetPlayerQueue());
+      state.shared.phase = "claim-trophy";
+      render();
+    });
+  });
+  app.querySelector(`[data-open="back-to-action"]`).addEventListener("click", () => {
+    resetSharedActionContext();
+    state.shared.phase = "choose-action";
+    render();
+  });
+}
+
 function renderSharedTrophyPicker(currentPlayer) {
   const claimingPlayer = selectedScoringPlayer() || currentPlayer;
   const claimingPlayerName = claimingPlayer.name;
+  const claimTarget = currentTrophyClaimTarget();
+  const claimProgress = trophyClaimProgressLabel();
   const trophyCards = getTrophyCardsForCurrentVersion().sort((a, b) => cardValue(b.title) - cardValue(a.title));
   const selectedCard = state.shared.pendingTrophyCard;
   const selectedEntry = selectedCard ? getWorkshopEntry(selectedCard.title) : null;
   const selectedParts = selectedEntry?.parts || [];
+  const trophyInstruction = trophyClaimInstruction(selectedCard);
   app.innerHTML = `
     <section class="shared-status">
       <p class="eyebrow">Claim Trophy</p>
       <h2>${escapeHtml(claimingPlayerName)} ${selectedCard ? `claims from ${escapeHtml(displayTitle(selectedCard.title))}` : "chooses a trophy card"}</h2>
-      <p>${escapeHtml(currentVersionLabel())}: ${selectedCard ? "choose the collected body part to shape the claim line." : "select the defeated opponent card first."}</p>
+      <p>${escapeHtml(currentVersionLabel())}: ${escapeHtml(trophyInstruction)}</p>
+      ${claimTarget ? `<p>${escapeHtml(claimProgress)}Defeated player: ${escapeHtml(claimTarget.name)}</p>` : ""}
     </section>
     <section class="menu-grid" aria-label="Trophy card picker">
       ${selectedCard ? `
@@ -1323,8 +1444,9 @@ function renderSharedTrophyPicker(currentPlayer) {
       app.querySelector(`[data-open="trophy-part-${index}"]`).addEventListener("click", () => {
         const scoringPlayer = selectedScoringPlayer() || currentPlayer;
         recordTrophy(scoringPlayer.id, selectedCard, part);
+        saveGameProgress();
         const trophyGroup = createTrophyClaimGroup(selectedCard, part);
-        openSharedLineModal(displayTitle("Claim Trophy"), scoringPlayer.name, [trophyGroup], "Next player", startNextSharedTurn);
+        openSharedLineModal(displayTitle("Claim Trophy"), scoringPlayer.name, [trophyGroup], nextTrophyClaimLabel(), advanceTrophyClaimOrTurn);
       });
     });
     app.querySelector(`[data-open="back-to-trophy-cards"]`).addEventListener("click", () => {
@@ -1341,7 +1463,62 @@ function renderSharedTrophyPicker(currentPlayer) {
   }
   app.querySelector(`[data-open="show-scoreboard"]`).addEventListener("click", showScoreboardModal);
   app.querySelector(`[data-open="show-missions"]`).addEventListener("click", () => showPrivateMissionsModal(claimingPlayer));
-  app.querySelector(`[data-open="skip-trophy"]`).addEventListener("click", startNextSharedTurn);
+  app.querySelector(`[data-open="skip-trophy"]`).addEventListener("click", advanceTrophyClaimOrTurn);
+}
+
+function trophyClaimInstruction(selectedCard) {
+  if (selectedCard) return "choose the collected body part to shape the claim line.";
+  if (state.shared.pendingOutcomeTitle === "Siege Attackers Win") return "the lowest face-value siege player claims the defender's defeated card.";
+  if (state.shared.pendingOutcomeTitle === "Siege Defender Wins") return "the defender claims every defeated siege member's card.";
+  return "select the defeated opponent card first.";
+}
+
+function setTrophyClaimContext(player, claimQueue = []) {
+  state.shared.claimingPlayerId = player.id;
+  state.shared.claimingPlayerName = player.name;
+  state.shared.pendingTrophyClaimQueue = claimQueue.length ? claimQueue.map((target) => ({ id: target.id, name: target.name })) : [];
+  state.shared.pendingTrophyClaimIndex = 0;
+  state.shared.pendingTrophyCard = null;
+}
+
+function currentTrophyClaimTarget() {
+  return state.shared.pendingTrophyClaimQueue[state.shared.pendingTrophyClaimIndex] || null;
+}
+
+function trophyClaimProgressLabel() {
+  const queue = state.shared.pendingTrophyClaimQueue;
+  if (queue.length <= 1) return "";
+  return `Trophy ${state.shared.pendingTrophyClaimIndex + 1} of ${queue.length}. `;
+}
+
+function nextTrophyClaimLabel() {
+  return hasMoreTrophyClaims() ? "Next trophy" : "Next player";
+}
+
+function hasMoreTrophyClaims() {
+  return state.shared.pendingTrophyClaimIndex < state.shared.pendingTrophyClaimQueue.length - 1;
+}
+
+function advanceTrophyClaimOrTurn() {
+  if (hasMoreTrophyClaims()) {
+    state.shared.pendingTrophyClaimIndex += 1;
+    state.shared.pendingTrophyCard = null;
+    state.shared.phase = "claim-trophy";
+    render();
+    return;
+  }
+  startNextSharedTurn();
+}
+
+function trophyClaimTargetsForOutcome(group, currentPlayer) {
+  if (group.title === "Attack Win" || group.title === "Attack Tie") return targetPlayerQueue();
+  if (group.title === "Attack Loss") return [{ id: currentPlayer.id, name: currentPlayer.name }];
+  return [];
+}
+
+function targetPlayerQueue() {
+  const target = state.shared.players.find((player) => player.id === state.shared.targetId);
+  return target ? [{ id: target.id, name: target.name }] : [];
 }
 
 function createTrophyClaimGroup(card, part) {
@@ -1411,7 +1588,7 @@ function currentVersionLabel() {
 
 function trophyClaimingPlayerId(group, currentPlayer) {
   if (group.title === "Attack Win" || group.title === "Attack Tie") return currentPlayer.id;
-  if (group.title === "Siege Attackers Win") return siegeTrophyWinnerId(currentPlayer);
+  if (group.title === "Siege Attackers Win") return currentPlayer.id;
   if (group.title === "Attack Loss" || group.title === "Siege Defender Wins") return state.shared.targetId || currentPlayer.id;
   return currentPlayer.id;
 }
@@ -1642,9 +1819,8 @@ function startSharedSiegeJoin(currentPlayer, target) {
   state.shared.siegeAllies = [];
 }
 
-function siegeTrophyWinnerId(currentPlayer) {
-  const firstAlly = state.shared.siegeAllies[0];
-  return firstAlly?.id || currentPlayer.id;
+function siegeParticipants(currentPlayer) {
+  return [currentPlayer, ...state.shared.siegeAllies].filter(Boolean);
 }
 
 function resetSharedSiege() {
@@ -1656,10 +1832,13 @@ function resetSharedSiege() {
 function resetSharedActionContext() {
   state.shared.pendingAction = null;
   state.shared.pendingTrophyCard = null;
+  state.shared.pendingOutcomeTitle = "";
   state.shared.targetId = "";
   state.shared.targetName = "";
   state.shared.claimingPlayerId = "";
   state.shared.claimingPlayerName = "";
+  state.shared.pendingTrophyClaimQueue = [];
+  state.shared.pendingTrophyClaimIndex = 0;
   resetSharedSiege();
 }
 
@@ -1675,6 +1854,7 @@ function createSharedState() {
     phase: "choose-action",
     pendingAction: null,
     pendingTrophyCard: null,
+    pendingOutcomeTitle: "",
     targetId: "",
     targetName: "",
     siegeResponders: [],
@@ -1682,6 +1862,8 @@ function createSharedState() {
     siegeAllies: [],
     claimingPlayerId: "",
     claimingPlayerName: "",
+    pendingTrophyClaimQueue: [],
+    pendingTrophyClaimIndex: 0,
   };
 }
 

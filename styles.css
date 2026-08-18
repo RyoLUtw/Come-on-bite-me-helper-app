@@ -230,6 +230,16 @@ details.menu-card {
   grid-template-rows: auto 1fr;
 }
 
+#settings-modal .settings-panel {
+  display: block;
+  overflow-y: auto;
+}
+
+#settings-modal .modal-header {
+  position: sticky;
+  top: 0;
+}
+
 .modal-header {
   z-index: 2;
   display: flex;
