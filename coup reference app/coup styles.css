@@ -100,7 +100,7 @@ button {
 
 .home-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -230,16 +230,6 @@ details.menu-card {
   grid-template-rows: auto 1fr;
 }
 
-#settings-modal .settings-panel {
-  display: block;
-  overflow-y: auto;
-}
-
-#settings-modal .modal-header {
-  position: sticky;
-  top: 0;
-}
-
 .modal-header {
   z-index: 2;
   display: flex;
@@ -320,6 +310,78 @@ details.menu-card {
   display: grid;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-section summary::after {
+  content: "+";
+  color: var(--green);
+  font-weight: 900;
+}
+
+.settings-section[open] summary::after {
+  content: "-";
+}
+
+.settings-section summary span {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-section summary small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.voice-layer-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.layer-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.layer-toggle span {
+  display: grid;
+  gap: 4px;
+}
+
+.layer-toggle small {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .player-count-row,
@@ -411,6 +473,33 @@ details.menu-card {
   line-height: 1.05;
 }
 
+.target-picker {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.target-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.target-option {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.target-option.selected {
+  border-color: var(--green);
+  background: #e4efe9;
+  color: #205d4c;
+}
+
 .sticky-actions {
   position: sticky;
   bottom: -18px;
@@ -492,33 +581,9 @@ details.menu-card {
   font-weight: 800;
 }
 
-.workshop-list {
-  display: grid;
-  gap: 12px;
-}
-
-.workshop-row {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-strong);
-}
-
-.workshop-row strong {
-  font-size: 1.08rem;
-}
-
-.mission-complete {
-  border-color: #d1d5db;
-  background: #f1f3f5;
-  color: #747b84;
-}
-
-.mission-complete .vocab-chip {
-  background: #e2e5e9;
-  color: #68717b;
+.settings-content {
+  overflow: auto;
+  min-height: 0;
 }
 
 .toggle-row {
@@ -527,94 +592,6 @@ details.menu-card {
   justify-content: space-between;
   gap: 20px;
   padding: 22px;
-}
-
-.settings-section {
-  display: grid;
-  gap: 14px;
-  padding: 22px;
-  border-top: 1px solid var(--line);
-}
-
-.settings-section summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  list-style: none;
-  cursor: pointer;
-}
-
-.settings-section summary::-webkit-details-marker {
-  display: none;
-}
-
-.settings-section summary::after {
-  content: "+";
-  color: var(--blue);
-  font-weight: 900;
-}
-
-.settings-section[open] summary::after {
-  content: "-";
-}
-
-.settings-section small {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-}
-
-.voice-layer-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.layer-toggle {
-  min-height: 86px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--surface-strong);
-}
-
-.layer-toggle input {
-  width: 52px;
-  height: 30px;
-  flex: 0 0 auto;
-  accent-color: var(--green);
-}
-
-.option-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.option-button {
-  min-height: 72px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--surface-strong);
-  color: var(--ink);
-  text-align: left;
-  font-weight: 900;
-}
-
-.option-button[aria-checked="true"] {
-  border-color: var(--green);
-  background: #e4efe9;
-  color: #205d4c;
-}
-
-.option-button small {
-  font-weight: 700;
 }
 
 .toggle-row small {

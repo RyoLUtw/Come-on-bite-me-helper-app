@@ -702,6 +702,56 @@ const MAX_SIEGE_ALLIES = 2;
 const MISSION_LENGTH_OPTIONS = [2, 3, 4, 5];
 const DEFAULT_MISSION_LENGTH = 3;
 const SAVED_GAME_KEY = "bite-shared-game-progress";
+const VOICE_LAYER_STORAGE_KEY = "bite-voice-line-layers-v1";
+const VOICE_LINE_LAYERS = [
+  {
+    id: "turn-actions",
+    label: "Turn Actions",
+    description: "Attack, Siege, Change Card, and Pass declarations.",
+  },
+  {
+    id: "target-siege-setup",
+    label: "Target / Siege Setup",
+    description: "Lines that frame target pressure and siege setup.",
+  },
+  {
+    id: "siege-reactions",
+    label: "Siege Reactions",
+    description: "Join Siege, Stay Out, and no-allies moments.",
+  },
+  {
+    id: "match-outcomes",
+    label: "Match Outcomes",
+    description: "Attack and siege win, loss, and tie results.",
+  },
+  {
+    id: "trophy-claims",
+    label: "Trophy Claims",
+    description: "Defeated-card and body-part trophy claim lines.",
+  },
+  {
+    id: "replacement-recovery",
+    label: "Replacement / Recovery",
+    description: "Card replacement, changing cards, and recovery beats.",
+  },
+  {
+    id: "special-card-rules",
+    label: "Special Card Rules",
+    description: "Fox, Hunter, and Bacteria rule reminder lines.",
+  },
+  {
+    id: "game-end-scoring",
+    label: "Game End / Scoring",
+    description: "Deck end, final scoring, and winner lines.",
+  },
+];
+const VOICE_LINE_LAYER_IDS = VOICE_LINE_LAYERS.map((layer) => layer.id);
+const DEFAULT_VISIBLE_VOICE_LAYER_IDS = new Set([
+  "turn-actions",
+  "target-siege-setup",
+  "siege-reactions",
+  "trophy-claims",
+]);
 const savedGameProgress = loadSavedGameProgress();
 
 const state = {
@@ -713,6 +763,7 @@ const state = {
   testMode: localStorage.getItem("bite-test-mode") === "true",
   showChineseNames: localStorage.getItem("bite-show-chinese-names") !== "false",
   showVocabTranslations: localStorage.getItem("bite-show-vocab-translations") !== "false",
+  visibleVoiceLayers: loadVisibleVoiceLayers(),
   linePools: loadLinePools(),
   shared: savedGameProgress?.shared || createSharedState(),
 };
@@ -730,6 +781,7 @@ const showChineseInput = document.querySelector("#show-chinese");
 const showVocabTranslationInput = document.querySelector("#show-vocab-translation");
 const versionSettings = document.querySelector("#version-settings");
 const missionLengthSettings = document.querySelector("#mission-length-settings");
+const voiceLayerOptions = document.querySelector("#voice-layer-options");
 const sharedSetupModal = document.querySelector("#shared-setup-modal");
 const sharedSetupContent = document.querySelector("#shared-setup-content");
 
@@ -741,6 +793,7 @@ function init() {
   showVocabTranslationInput.checked = state.showVocabTranslations;
   renderVersionSettings();
   renderMissionLengthSettings();
+  renderVoiceLayerSettings();
   bindShellEvents();
   render();
 }
@@ -776,6 +829,21 @@ function bindShellEvents() {
   showVocabTranslationInput.addEventListener("change", () => {
     state.showVocabTranslations = showVocabTranslationInput.checked;
     localStorage.setItem("bite-show-vocab-translations", String(state.showVocabTranslations));
+    if (modal.open) redrawOpenModal();
+  });
+
+  voiceLayerOptions.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-voice-layer]");
+    if (!input) return;
+    state.visibleVoiceLayers[input.dataset.voiceLayer] = input.checked;
+    saveVisibleVoiceLayers();
+    if (modal.open) redrawOpenModal();
+  });
+
+  settingsModal.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-voice-layer-select]");
+    if (!button) return;
+    setAllVoiceLayersVisible(button.dataset.voiceLayerSelect === "all");
     if (modal.open) redrawOpenModal();
   });
 
@@ -892,6 +960,29 @@ function renderMissionLengthSettings() {
       renderMissionLengthSettings();
     });
   });
+}
+
+function renderVoiceLayerSettings() {
+  if (!voiceLayerOptions) return;
+  voiceLayerOptions.innerHTML = VOICE_LINE_LAYERS.map((layer) => `
+    <label class="layer-toggle">
+      <span>
+        <strong>${escapeHtml(layer.label)}</strong>
+        <small>${escapeHtml(layer.description)}</small>
+      </span>
+      <input type="checkbox" role="switch" data-voice-layer="${escapeHtml(layer.id)}" ${isVoiceLayerVisible(layer.id) ? "checked" : ""}>
+    </label>
+  `).join("");
+}
+
+function setAllVoiceLayersVisible(visible) {
+  VOICE_LINE_LAYER_IDS.forEach((id) => {
+    state.visibleVoiceLayers[id] = visible;
+  });
+  voiceLayerOptions.querySelectorAll("[data-voice-layer]").forEach((input) => {
+    input.checked = visible;
+  });
+  saveVisibleVoiceLayers();
 }
 
 function setGameVersion(versionId, options = {}) {
@@ -1943,14 +2034,17 @@ function renderSharedSetupModal() {
 }
 
 function openSharedLineModal(title, playerName, groups, nextLabel, nextHandler, context = {}) {
+  const visibleGroups = getVisibleLineGroups(groups);
   modal.dataset.currentTitle = title;
   modal.dataset.currentKicker = playerName;
   modal.dataset.currentGroups = JSON.stringify(groups);
   modal.dataset.currentContext = JSON.stringify(context);
+  modal.dataset.currentNextLabel = nextLabel;
+  modal._sharedNextHandler = nextHandler;
   modalTitle.textContent = title;
   modalKicker.textContent = playerName;
   modalContent.innerHTML = `
-    ${groups.map((group) => renderLineGroup(group, true, context)).join("")}
+    ${renderVisibleLineGroups(visibleGroups, context)}
     <div class="modal-actions sticky-actions">
       <button class="primary-button" type="button" data-shared-next>${escapeHtml(nextLabel)}</button>
     </div>
@@ -1971,32 +2065,91 @@ function startNextSharedTurn() {
 }
 
 function openLineModal(title, kicker, groups) {
+  const visibleGroups = getVisibleLineGroups(groups);
   modal.dataset.currentTitle = title;
   modal.dataset.currentKicker = kicker;
   modal.dataset.currentGroups = JSON.stringify(groups);
   modal.dataset.currentContext = "{}";
+  modal.dataset.currentNextLabel = "";
+  modal._sharedNextHandler = null;
   modalTitle.textContent = title;
   modalKicker.textContent = kicker;
-  modalContent.innerHTML = groups.map((group) => renderLineGroup(group, groups.length === 1)).join("");
+  modalContent.innerHTML = renderVisibleLineGroups(visibleGroups);
   modal.showModal();
 }
 
 function redrawOpenModal() {
   const groups = JSON.parse(modal.dataset.currentGroups || "[]");
   const context = JSON.parse(modal.dataset.currentContext || "{}");
-  const shouldOpenOnlyGroup = groups.length === 1;
   const hasSharedNext = modalContent.querySelector("[data-shared-next]");
+  const nextLabel = modal.dataset.currentNextLabel || "Continue";
+  const visibleGroups = getVisibleLineGroups(groups);
   modalTitle.textContent = modal.dataset.currentTitle || "";
   modalKicker.textContent = modal.dataset.currentKicker || "";
-  modalContent.innerHTML = groups.map((group) => renderLineGroup(group, shouldOpenOnlyGroup, context)).join("");
+  modalContent.innerHTML = renderVisibleLineGroups(visibleGroups, context);
   if (hasSharedNext) {
     modalContent.insertAdjacentHTML("beforeend", `
       <div class="modal-actions sticky-actions">
-        <button class="primary-button" type="button" data-shared-next>Continue</button>
+        <button class="primary-button" type="button" data-shared-next>${escapeHtml(nextLabel)}</button>
       </div>
     `);
-    modalContent.querySelector("[data-shared-next]").addEventListener("click", () => modal.close());
+    modalContent.querySelector("[data-shared-next]").addEventListener("click", () => {
+      modal.close();
+      modal._sharedNextHandler?.();
+    });
   }
+}
+
+function renderVisibleLineGroups(groups, context = {}) {
+  if (!groups.length) {
+    return `
+      <div class="empty-state">
+        Voice lines are hidden for this interaction layer.
+      </div>
+    `;
+  }
+  return groups.map((group) => renderLineGroup(group, groups.length === 1, context)).join("");
+}
+
+function getVisibleLineGroups(groups) {
+  return groups.filter((group) => group && isVoiceLayerVisible(getVoiceLayerForGroup(group)));
+}
+
+function isVoiceLayerVisible(layerId) {
+  return state.visibleVoiceLayers[layerId] !== false;
+}
+
+function getVoiceLayerForGroup(group) {
+  if (group?.layerId) return group.layerId;
+  const title = group?.title || "";
+
+  if (["Attack", "Siege"].includes(title)) return "target-siege-setup";
+  if (["Change Card", "Pass"].includes(title)) return "turn-actions";
+  if (["Draw Replacement"].includes(title)) return "replacement-recovery";
+  if (["Fox Change Card", "Hunter Rule", "Bacteria Rule"].includes(title)) return "special-card-rules";
+  if (["Join Siege", "Stay Out", "No Allies Join"].includes(title)) return "siege-reactions";
+  if (["Attack Win", "Attack Loss", "Attack Tie", "Siege Attackers Win", "Siege Defender Wins"].includes(title)) return "match-outcomes";
+  if (["Take Trophy"].includes(title) || title.includes("Trophy") || TROPHY_CARD_LIBRARY.some((card) => title.startsWith(`${card.title} `))) return "trophy-claims";
+  if (["Deck Ends", "Final Scoring"].includes(title)) return "game-end-scoring";
+
+  return "turn-actions";
+}
+
+function loadVisibleVoiceLayers() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(VOICE_LAYER_STORAGE_KEY) || "{}");
+  } catch {
+    saved = {};
+  }
+  return Object.fromEntries(VOICE_LINE_LAYER_IDS.map((id) => [
+    id,
+    typeof saved[id] === "boolean" ? saved[id] : DEFAULT_VISIBLE_VOICE_LAYER_IDS.has(id),
+  ]));
+}
+
+function saveVisibleVoiceLayers() {
+  localStorage.setItem(VOICE_LAYER_STORAGE_KEY, JSON.stringify(state.visibleVoiceLayers));
 }
 
 function renderLineGroup(group, open, context = {}) {
